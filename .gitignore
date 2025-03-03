@@ -1,10 +1,7 @@
 /__pycache__
 /.pytest_cache
-/core/__pycache__
 /venv
 /profiles
-/core/profiles
-#/database
 database/*
 !database/.gitkeep
 .env
