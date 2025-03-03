@@ -1,0 +1,17 @@
+
+services:
+  redis:
+    image: redis:6.2
+    ports:
+      - "6379:6379"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
+    restart: always
+  market-data:
+    build: ./marketservise
+    # container_name: market-data
+    restart: always
+    depends_on:
+      - redis
+
