@@ -26,22 +26,20 @@ services:
       depends_on:
         - redis
   mariadb:
-      image: mariadb:latest
-      container_name: mariadb
+      image: mariadb:10.6
       environment:
         MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
         MARIADB_DATABASE: ${DB_NAME}
         MARIADB_USER: ${DB_USER}
         MARIADB_PASSWORD: ${DB_PASSWORD}
       ports:
-        - "3306:3306"
+        - "3307:3306"
       volumes:
         - ./database:/var/lib/mysql
       restart: always
 
   phpmyadmin:
-    image: phpmyadmin/phpmyadmin
-    container_name: phpmyadmin
+    image: phpmyadmin
     depends_on:
       - mariadb
     environment:
@@ -50,7 +48,7 @@ services:
       PMA_PASSWORD: ${DB_PASSWORD}
       PMA_PORT: 3306
     ports:
-      - "8080:80"
+      - "8081:80"
     restart: always
 
   open-interest:
@@ -63,6 +61,6 @@ services:
       - redis
       - mariadb
     restart: always
-
-  volumes:
-    mariadb_data:
+    
+volumes:
+  mariadb_data:

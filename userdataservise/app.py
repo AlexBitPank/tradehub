@@ -19,7 +19,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-
 def get_listen_key(api_key: str, base_url: str = "https://fapi.binance.com") -> str:
     """
     Получает listenKey для USDS-M фьючерсов (функция синхронная, 
@@ -51,20 +50,8 @@ def get_listen_key(api_key: str, base_url: str = "https://fapi.binance.com") -> 
     logger.info("Успешно получен listenKey: %s", lk)
     return lk
 
-# -----------------------------------------------------------------------------
-# Заглушка для примера (обновление баланса)
-# -----------------------------------------------------------------------------
-class OFN:
-    async def update_balance(self, asyncClient, g_balances):
-        # Вставьте сюда свою реальную логику обновления баланса
-        pass
 
-ofn = OFN()
-g_balances = {}  # условно глобальный словарь балансов, если нужно
-
-# -----------------------------------------------------------------------------
 # Обработка событий User Data Stream (ACCOUNT_UPDATE, ORDER_TRADE_UPDATE, ...)
-# -----------------------------------------------------------------------------
 async def process_user_data_event(res: dict, redis_client: RedisClient):
     """
     Обработка события от user data stream (фьючерсов).
@@ -72,8 +59,6 @@ async def process_user_data_event(res: dict, redis_client: RedisClient):
     """
     event_type = res.get("e", "")
     if event_type == "ACCOUNT_UPDATE":
-        # Пример обновления баланса
-        await ofn.update_balance(None, g_balances)
 
         positions = res["a"]["P"]  # список позиций
         for row in positions:
@@ -130,9 +115,7 @@ async def process_user_data_event(res: dict, redis_client: RedisClient):
         logger.info("ORDER_TRADE_UPDATE: %s", order_data)
 
 
-# -----------------------------------------------------------------------------
 # Чтение сообщений (events) из WebSocket и передача в process_user_data_event
-# -----------------------------------------------------------------------------
 async def receive_user_data_messages(ws, redis_client: RedisClient):
     async for message in ws:
         try:
@@ -152,9 +135,7 @@ async def receive_user_data_messages(ws, redis_client: RedisClient):
             logger.error("Ошибка при обработке сообщения user data stream: %s", e, exc_info=True)
 
 
-# -----------------------------------------------------------------------------
 # Основная корутина для подписки к user data stream
-# -----------------------------------------------------------------------------
 async def subscribe_user_data_stream(api_key: str):
     """
     1. Получаем listenKey
