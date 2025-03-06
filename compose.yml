@@ -10,8 +10,59 @@ services:
     restart: always
   market-data:
     build: ./marketservise
+    image: marketservise:1.0
     # container_name: market-data
+    env_file:
+      .env
     restart: always
     depends_on:
       - redis
+  user-data:
+      build: ./userdataservise
+      image: userdata:1.0
+      env_file:
+        .env
+      restart: always
+      depends_on:
+        - redis
+  mariadb:
+      image: mariadb:latest
+      container_name: mariadb
+      environment:
+        MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+        MARIADB_DATABASE: ${DB_NAME}
+        MARIADB_USER: ${DB_USER}
+        MARIADB_PASSWORD: ${DB_PASSWORD}
+      ports:
+        - "3306:3306"
+      volumes:
+        - ./database:/var/lib/mysql
+      restart: always
 
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: phpmyadmin
+    depends_on:
+      - mariadb
+    environment:
+      PMA_HOST: mariadb
+      PMA_USER: ${DB_USER}
+      PMA_PASSWORD: ${DB_PASSWORD}
+      PMA_PORT: 3306
+    ports:
+      - "8080:80"
+    restart: always
+
+  open-interest:
+    build: ./openinterestservice
+    image: openinterestservice:1.0
+    container_name: open-interest
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - mariadb
+    restart: always
+
+  volumes:
+    mariadb_data:

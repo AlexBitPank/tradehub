@@ -1,57 +1,18 @@
+from os import getenv
 import asyncio
 import websockets
 import json
-import time
 import redis.asyncio as redis
 from strems import streams
+import logging
+from redis_client import RedisClient
 
-redis_host = 'redis'
-redis_port = 6379
-redis_password = 'Redisbot1235!'
+REDIS_HOST = getenv("REDIS_HOST")
+REDIS_PORT = getenv("REDIS_PORT")
+REDIS_PASSWORD = getenv("REDIS_PASSWORD")
 
-class RedisClient:
-    def __init__(self, host: str, port: int, password: str, db: int = 0):
-        self.client = redis.Redis(host=host, port=port, db=db, password=password, decode_responses=True)
-
-    async def save_closed_candle_in_list(self, candle: dict):
-        """
-        Сохраняет "закрывшуюся" свечу в конец списка (RPUSH), 
-        одновременно обрезая список (LTRIM), 
-        чтобы в нём оставалось не более 50 последних свечей.
-        """
-        key = f"candles:{candle['symbol']}:{candle['interval']}"
-        # Используем пайплайн, чтобы отправить несколько команд одним пакетом
-        async with self.client.pipeline(transaction=False) as pipe:
-            pipe.rpush(key, json.dumps(candle))
-            pipe.ltrim(key, -5, -1)  # Оставляем последние 5 элементов
-            await pipe.execute()
-
-    async def save_closed_candle(self, candle: dict):
-        """
-        Сохраняем каждую закрытую свечу в отдельном ключе с TTL = 1 час.
-        Дополнительно добавляем запись в отсортированный набор (Sorted Set),
-        чтобы можно было получить список ключей свечей в хронологическом порядке.
-        """
-        # Формируем уникальный ключ, например по close_time
-        # Пример: candle:BTCUSDT:1m:1677801600000
-        candle_key = f"candle:{candle['symbol']}:{candle['interval']}:{candle['close_time']}"
-
-        # Сохраняем данные свечи
-        await self.client.set(candle_key, json.dumps(candle))
-
-        # Устанавливаем время жизни ключа (TTL) = 3600 секунд (1 час)
-        await self.client.expire(candle_key, 1600)
-
-        # Добавляем ключ свечи в Sorted Set с ключом вида:
-        # candles_index:BTCUSDT:1m
-        # В качестве score используем close_time (float).
-        zset_key = f"candles_index:{candle['symbol']}:{candle['interval']}"
-        close_time_score = float(candle['close_time'])
-        await self.client.zadd(zset_key, {candle_key: close_time_score})
-
-    async def save_current_candle(self, candle: dict):
-        key = f"current:{candle['symbol']}:{candle['interval']}"
-        await self.client.set(key, json.dumps(candle))
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def rename_candle_keys(raw_candle: dict) -> dict:
@@ -80,13 +41,13 @@ async def process_message(message: str, redis_client: RedisClient):
         data = json.loads(message)
         raw_candle = data['data']['k']
         candle = rename_candle_keys(raw_candle)
-
+        
         if candle["is_closed"]:
             await redis_client.save_closed_candle_in_list(candle)
         else:
             await redis_client.save_current_candle(candle)
     except Exception as e:
-        print("Ошибка при обработке сообщения:", e)
+        logger.error(f"Ошибка при обработке сообщения: {e}")
 
 async def receive_messages(ws, redis_client: RedisClient):
     async for message in ws:
@@ -98,17 +59,18 @@ async def subscribe_kline_streams():
     # Формируем URL, объединяя элементы списка streams через "/"
     streams_part = "/".join(streams)
     url = f"wss://fstream.binance.com/stream?streams={streams_part}"
-    redis_client = RedisClient(host=redis_host, port=redis_port, password=redis_password)
+    redis_client = RedisClient(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD)
     
     while True:
         try:
             # Возможно, имеет смысл увеличить ping_timeout, если сервер ожидает быстрее
             async with websockets.connect(url, ping_interval=180, ping_timeout=600) as ws:
-                print("Подключение к Binance WebSocket установлено")
+                # logger.info(f"Подключение к Binance WebSocket установлено")
+                print(f"Подключение к Binance WebSocket установлено")
                 await receive_messages(ws, redis_client)
         except Exception as e:
-            print("Ошибка соединения:", e)
-        print("Переподключаемся через 5 секунд...")
+            logger.error(f"Ошибка соединения: {e}")
+        logger.info(f"Переподключаемся через 5 секунд...")
         await asyncio.sleep(5)
 
 if __name__ == '__main__':
