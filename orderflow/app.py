@@ -6,10 +6,8 @@ import requests
 from urllib.parse import urlencode
 
 
-# API_KEY = getenv("API_KEY_BIN")
-# API_SECRET = getenv("SECRET_KEY_BIN")
-API_KEY="oiQRMhygd3qQA5Jwip78Ps8Rz39MnUIgm5u2fqLkisHsuyKVT4Fm7glmC8pnlMY0"
-API_SECRET="zzCoITzkwyEvBZVI6dwwgj3XB2LJlH5xcHq0a3nJWdbBEu0FqElonv12TfE8YxT4"
+API_KEY = getenv("API_KEY_BIN")
+API_SECRET = getenv("SECRET_KEY_BIN")
 
 
 BASE_URL = 'https://fapi.binance.com'  # Для торговли на USDS-маржинальных фьючерсах
