@@ -14,12 +14,6 @@ class DBManager:
         self.pool = None
 
     async def init_pool(self):
-        """
-        Инициализирует пул подключений к MariaDB.
-        Заодно создаёт базу (если не существует),
-        а затем внутри неё — таблицу open_interest_history (с уникальным индексом).
-        """
-        # Сначала подключимся к mysql-серверу без указания db
         try:
             logger.info(f"Подключаемся к MariaDB без указания базы ({self.host}:{self.port})...")
             conn = await aiomysql.connect(
@@ -34,7 +28,6 @@ class DBManager:
         except Exception as e:
             logger.error(f"Ошибка при создании базы {self.db_name}: {e}")
 
-        # Создаём пул
         self.pool = await aiomysql.create_pool(
             host=self.host,
             port=self.port,
@@ -46,7 +39,6 @@ class DBManager:
             maxsize=5
         )
 
-        # Создаём таблицу open_interest_history (если нет) с уникальным индексом
         create_table_sql = """
         CREATE TABLE IF NOT EXISTS open_interest_history (
             id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -64,8 +56,6 @@ class DBManager:
         async with self.pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(create_table_sql)
-                # В MariaDB 10.6 синтаксис IF NOT EXISTS для CREATE INDEX может не работать,
-                # можно обойтись TRY/EXCEPT или вручную проверить.
                 try:
                     await cur.execute(unique_index_sql)
                 except Exception as e:
@@ -78,10 +68,6 @@ class DBManager:
             await self.pool.wait_closed()
 
     async def save_open_interest(self, symbol: str, oi_data: list):
-        """
-        Сохраняем список OI записей. Используем INSERT IGNORE + уникальный индекс
-        (symbol, timestamp), чтобы не плодить дубликаты.
-        """
         if not oi_data:
             return
 
@@ -100,6 +86,27 @@ class DBManager:
                     try:
                         await cur.execute(insert_sql, (symbol, ts, sum_oi, sum_oi_val))
                     except Exception as e:
-                        logger.error(
-                            f"Ошибка при вставке OI (symbol={symbol}, ts={ts}): {e}"
-                        )
+                        logger.error(f"Ошибка при вставке OI (symbol={symbol}, ts={ts}): {e}")
+
+    async def get_last_timestamp(self, symbol: str) -> int:
+        """
+        Возвращает максимальный (последний) timestamp для заданного символа из БД.
+        """
+        query = "SELECT MAX(timestamp) FROM open_interest_history WHERE symbol = %s"
+        async with self.pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(query, (symbol,))
+                row = await cur.fetchone()
+                return row[0] if row and row[0] is not None else None
+
+    async def get_open_interest_timestamps(self, symbol: str, limit: int = 10) -> list:
+        """
+        Возвращает список timestamp последних записей для заданного символа из БД.
+        """
+        query = "SELECT timestamp FROM open_interest_history WHERE symbol = %s ORDER BY timestamp DESC LIMIT %s"
+        async with self.pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(query, (symbol, limit))
+                rows = await cur.fetchall()
+                timestamps = [row[0] for row in rows if row[0] is not None]
+                return timestamps

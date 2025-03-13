@@ -44,5 +44,5 @@ class RedisClient:
         await self.client.zadd(zset_key, {candle_key: close_time_score})
 
     async def save_current_candle(self, candle: dict):
-        key = f"current:{candle['symbol']}:{candle['interval']}"
+        key = f"candle_current:{candle['symbol']}:{candle['interval']}"
         await self.client.set(key, json.dumps(candle))
