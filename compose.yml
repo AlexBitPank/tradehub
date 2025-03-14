@@ -61,6 +61,16 @@ services:
       - redis
       - mariadb
     restart: always
-    
+  fronthub:
+    build: ./frontend
+    image: fronthub:1.0
+    ports:
+      - 5001:5000
+    env_file:
+      .env
+    depends_on:
+      - mariadb
+    restart: always
+
 volumes:
   mariadb_data:

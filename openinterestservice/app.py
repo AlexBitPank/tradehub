@@ -13,6 +13,7 @@ import json
 
 from strems import streams
 from redis_client import RedisClient
+from db import DBManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,6 +22,12 @@ logger = logging.getLogger(__name__)
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
+
+DB_HOST = os.getenv("DB_HOST", "mariadb")
+DB_PORT = int(os.getenv("DB_PORT", "3306"))
+DB_USER = os.getenv("DB_USER", "myuser")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "mypass")
+DB_NAME = os.getenv("DB_NAME", "open_interest_db")
 
 OPEN_INTEREST_HIST_URL = "https://fapi.binance.com/futures/data/openInterestHist"
 CURRENT_OPEN_INTEREST_URL = "https://fapi.binance.com/fapi/v1/openInterest"
@@ -61,7 +68,7 @@ async def clear_redis_data_on_startup(redis_client: RedisClient):
     except Exception as e:
         logger.error(f"Ошибка при очистке Redis: {e}")
 
-async def _fetch_open_interest(session, symbol: str, limit=DEFAULT_LIMIT) -> list:
+async def fetch_open_interest(session, symbol: str, limit=DEFAULT_LIMIT) -> list:
     params = {
         "symbol": symbol,
         "period": PERIOD,
@@ -76,7 +83,7 @@ async def _fetch_open_interest(session, symbol: str, limit=DEFAULT_LIMIT) -> lis
         logger.error(f"Ошибка при запросе исторических данных OI для {symbol}: {e}")
         return []
 
-async def _fetch_current_open_interest(session, symbol: str) -> dict:
+async def fetch_current_open_interest(session, symbol: str) -> dict:
     params = {"symbol": symbol}
     try:
         async with session.get(CURRENT_OPEN_INTEREST_URL, params=params) as response:
@@ -87,7 +94,7 @@ async def _fetch_current_open_interest(session, symbol: str) -> dict:
         logger.error(f"Ошибка при запросе текущего OI для {symbol}: {e}")
         return {}
 
-async def fetch_current_open_interest(
+async def _fetch_current_open_interest(
     session, 
     symbol: str, 
     max_retries: int = 3, 
@@ -140,7 +147,7 @@ async def fetch_current_open_interest(
     
     return {}
 
-async def fetch_open_interest(
+async def _fetch_open_interest(
     session, 
     symbol: str, 
     period: str = "5m", 
@@ -196,15 +203,15 @@ async def fetch_open_interest(
     
     return []
 
-async def process_symbol_current_oi(symbol: str, session, redis_client: RedisClient):
+async def process_symbol_current_oi(symbol: str, session, redis_client: RedisClient, db_manager: DBManager):
     """
     1) Запрашиваем текущий OI с биржи.
     2) Сохраняем в Redis через redis_client.save_current_open_interest.
     3) Получаем из Redis историю (до 30 записей), вычисляем средний OI и сравниваем c текущим.
     """
     try:
-        # data = await fetch_current_open_interest(session, symbol)
-        data = await fetch_current_open_interest(session, symbol, max_retries=3, base_delay=1.0)
+        data = await fetch_current_open_interest(session, symbol)
+        # data = await fetch_current_open_interest(session, symbol, max_retries=3, base_delay=1.0)
         if not data:
             return
         
@@ -230,20 +237,36 @@ async def process_symbol_current_oi(symbol: str, session, redis_client: RedisCli
                 # Текущее значение открытого интереса
                 current_oi = float(data["openInterest"])
                 
+                # Читаем «пороговое» значение из Redis (если нет, используем 0)
+                last_threshold_key = f"last_threshold:{symbol}"
+                threshold_str = await redis_client.client.get(last_threshold_key)
+                last_threshold = float(threshold_str) if threshold_str else None
+
                 # Проверка отклонения более чем на n%
-                if current_oi > avg_oi * 1.1:
-                    logger.warning(
-                        f"УВЕЛИЧЕНИЕ OI для {symbol}: "
-                        f"текущий={shorten_number(current_oi)}, средний({DEFAULT_LIMIT})={shorten_number(avg_oi)}, "
-                        f"отклонение={((current_oi - avg_oi) / avg_oi * 100):.2f}%"
+                if (last_threshold is None or current_oi > last_threshold) and current_oi > avg_oi * 1.1:
+                    message = (
+                        f"{symbol}: "
+                        f"current={shorten_number(current_oi)}, avg({DEFAULT_LIMIT})={shorten_number(avg_oi)}, "
+                        f"deviation={((current_oi - avg_oi) / avg_oi * 100):.2f}%"
                     )
-                elif current_oi < avg_oi * 0.9:
-                    logger.warning(
-                        f"СНИЖЕНИЕ OI для {symbol}: "
-                        f"текущий={shorten_number(current_oi)}, средний({DEFAULT_LIMIT})={shorten_number(avg_oi)}, "
-                        f"отклонение={((current_oi - avg_oi) / avg_oi * 100):.2f}%"
+                    logger.warning(message)
+                    # Запись лога в БД
+                    await db_manager.save_log(message)
+                    new_threshold = current_oi * 1.01
+                    await redis_client.client.set(last_threshold_key, new_threshold, ex=300)
+
+                elif (last_threshold is None or current_oi < last_threshold) and current_oi < avg_oi * 0.9:
+                    message = (
+                        f"{symbol}: "
+                        f"current={shorten_number(current_oi)}, avg({DEFAULT_LIMIT})={shorten_number(avg_oi)}, "
+                        f"deviation={((current_oi - avg_oi) / avg_oi * 100):.2f}%"
                     )
-                break
+                    logger.warning(message)
+                    # Запись лога в БД
+                    await db_manager.save_log(message)
+                    new_threshold = current_oi * 0.99
+                    await redis_client.client.set(last_threshold_key, new_threshold, ex=600)
+                break                
             else:
                 if attempt == max_retries:
                     logger.info(
@@ -261,22 +284,22 @@ async def process_symbol_current_oi(symbol: str, session, redis_client: RedisCli
 
 async def process_symbol_hist(symbol: str, session, redis_client: RedisClient):
     try:
-        # data = await fetch_open_interest(session, symbol, limit=DEFAULT_LIMIT)
-        data = await fetch_open_interest(session, symbol, PERIOD, DEFAULT_LIMIT, max_retries=3, base_delay=1.0)
+        data = await fetch_open_interest(session, symbol, limit=DEFAULT_LIMIT)
+        # data = await fetch_open_interest(session, symbol, PERIOD, DEFAULT_LIMIT, max_retries=3, base_delay=1.0)
         if not data:
             return
         await redis_client.push_open_interest_list(symbol, data, max_length=DEFAULT_LIMIT)
     except Exception as e:
         logger.error(f"Ошибка в process_symbol_hist для {symbol}: {e}")
 
-async def current_oi_loop(session, redis_client: RedisClient):
+async def current_oi_loop(session, redis_client: RedisClient, db_manager: DBManager):
     logger.info("current_oi_loop started")
     while True:
         try:
             tasks = []
             for stream in streams:
                 symbol = parse_symbol_from_stream(stream)
-                tasks.append(process_symbol_current_oi(symbol, session, redis_client))
+                tasks.append(process_symbol_current_oi(symbol, session, redis_client, db_manager))
             await asyncio.gather(*tasks, return_exceptions=True)
         except Exception as e:
             logger.error(f"Ошибка в цикле сбора текущего OI: {e}")
@@ -299,11 +322,20 @@ async def main():
     redis_client = RedisClient(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD)
     # Очистка данных при старте
     await clear_redis_data_on_startup(redis_client)
+    # Подключение к БД: создаём экземпляр DBManager и инициализируем пул соединений
+    db_manager = DBManager(
+        host=DB_HOST,
+        port=DB_PORT,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        db_name=DB_NAME
+    )
+    await db_manager.init_pool()
 
     timeout = aiohttp.ClientTimeout(total=30)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         await asyncio.gather(
-            current_oi_loop(session, redis_client),
+            current_oi_loop(session, redis_client, db_manager),
             historical_oi_loop(session, redis_client)
         )
 

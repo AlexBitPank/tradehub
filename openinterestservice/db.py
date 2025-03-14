@@ -62,6 +62,20 @@ class DBManager:
                     logger.warning(f"Не удалось создать уникальный индекс (возможно, уже существует): {e}")
         logger.info("Таблица open_interest_history и индекс проверены/созданы")
 
+        # Создаём новую таблицу для логов
+        create_log_table_sql = """
+        CREATE TABLE IF NOT EXISTS open_interest_log (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            log_message TEXT,
+            log_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+        async with self.pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(create_log_table_sql)
+        logger.info("Таблица open_interest_log проверена/создана")
+
+
     async def close_pool(self):
         if self.pool:
             self.pool.close()
@@ -110,3 +124,16 @@ class DBManager:
                 rows = await cur.fetchall()
                 timestamps = [row[0] for row in rows if row[0] is not None]
                 return timestamps
+
+  # Новый метод для сохранения логов
+    async def save_log(self, log_message: str):
+        insert_sql = """
+            INSERT INTO open_interest_log (log_message)
+            VALUES (%s)
+        """
+        async with self.pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                try:
+                    await cur.execute(insert_sql, (log_message,))
+                except Exception as e:
+                    logger.error(f"Ошибка при вставке лога: {e}")

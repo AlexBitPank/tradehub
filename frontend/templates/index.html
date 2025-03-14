@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logs Viewer</title>
+    <style>
+        :root {
+            --background-color: white;
+            --text-color: black;
+            --table-header-bg: #f2f2f2;
+            --new-log-bg: #d4f8d4;
+            --error-log-bg: #f8d4d4;
+        }
+
+        [data-theme="dark"] {
+            --background-color: #1e1e1e;
+            --text-color: #f0f0f0;
+            --table-header-bg: #333;
+            --new-log-bg: #39573b;
+            --error-log-bg: #573939;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: var(--background-color);
+            color: var(--text-color);
+        }
+
+        /* Новый контейнер для заголовка и кнопки */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        h1 {
+            margin: 0;
+        }
+
+        #themeToggle {
+            cursor: pointer;
+            background: none;
+            border: none;
+            color: var(--text-color);
+            font-size: 16px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        
+        th {
+            background-color: var(--table-header-bg);
+        }
+        
+        .log-message {
+            white-space: pre-wrap;
+        }
+        
+        #logsTableWrapper {
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        
+        .new-log {
+            animation: fadeOutHighlight 10s forwards;
+            background-color: var(--new-log-bg);
+        }
+        
+        @keyframes fadeOutHighlight {
+            0% {
+                background-color: var(--new-log-bg);
+            }
+            100% {
+                background-color: transparent;
+            }
+        }
+        
+        .error-log {
+            background-color: var(--error-log-bg);
+        }
+
+        #searchInput {
+            margin-bottom: 10px;
+            width: calc(100% - 20px);
+            padding: 8px;
+        }
+    </style>
+</head>
+<body data-theme="light">
+    <!-- Контейнер для заголовка и кнопки -->
+    <div class="header">
+        <h1>Logs Viewer</h1>
+        <span id="themeToggle">Dark</span>
+    </div>
+
+    <input type="text" id="searchInput" placeholder="Search logs..." oninput="filterLogs()">
+
+    <div id="logsTableWrapper">
+        <table id="logsTable">
+            <thead>
+                <tr>
+                    <th>Log Message</th>
+                    <th>Log Time</th>
+                </tr>
+            </thead>
+            <tbody>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        let lastLogId = null;
+        let allLogs = [];
+
+        // Toggle theme
+        const themeToggle = document.getElementById('themeToggle');
+        themeToggle.addEventListener('click', () => {
+            const currentTheme = document.body.getAttribute('data-theme');
+            if (currentTheme === 'dark') {
+                document.body.setAttribute('data-theme', 'light');
+                themeToggle.textContent = 'Dark';
+            } else {
+                document.body.setAttribute('data-theme', 'dark');
+                themeToggle.textContent = 'Light';
+            }
+        });
+
+        async function fetchLogs() {
+            const response = await fetch('/logs');
+            const logs = await response.json();
+            const tableBody = document.querySelector('#logsTable tbody');
+
+            const newLogs = lastLogId ? logs.filter(log => log.id > lastLogId) : logs;
+
+            if (newLogs.length > 0) {
+                allLogs = logs;
+                tableBody.innerHTML = '';
+
+                logs.forEach(log => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td class="log-message">${log.log_message}</td>
+                        <td>${new Date(log.log_time).toLocaleString()}</td>
+                    `;
+
+                    if (newLogs.some(newLog => newLog.id === log.id)) {
+                        row.classList.add('new-log');
+                    }
+
+                    tableBody.appendChild(row);
+                });
+
+                lastLogId = logs[logs.length - 1].id;
+                tableBody.lastElementChild.scrollIntoView({ behavior: "smooth" });
+            }
+        }
+
+        function filterLogs() {
+            const filterText = document.getElementById('searchInput').value.toLowerCase();
+            const tableBody = document.querySelector('#logsTable tbody');
+            tableBody.innerHTML = '';
+
+            const filteredLogs = allLogs.filter(log =>
+                log.log_message.toLowerCase().includes(filterText)
+            );
+
+            filteredLogs.forEach(log => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="log-message">${log.log_message}</td>
+                    <td>${new Date(log.log_time).toLocaleString()}</td>
+                `;
+
+                tableBody.appendChild(row);
+            });
+        }
+
+        setInterval(fetchLogs, 2000);
+        fetchLogs();
+    </script>
+</body>
+</html>
