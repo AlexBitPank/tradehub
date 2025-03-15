@@ -2,6 +2,7 @@ import warnings
 warnings.filterwarnings("ignore", category=Warning, message="Duplicate entry.*for key 'idx_symbol_timestamp'")
 warnings.filterwarnings("ignore", category=Warning, message="Can't create database.*")
 warnings.filterwarnings("ignore", category=Warning, message="Table 'open_interest_history' already exists")
+warnings.filterwarnings("ignore", category=Warning, message="Table 'open_interest_log' already exists")
 warnings.filterwarnings("ignore", category=Warning, message="Duplicate key name 'idx_symbol_timestamp'")
 
 import os
@@ -246,20 +247,20 @@ async def process_symbol_current_oi(symbol: str, session, redis_client: RedisCli
                 if (last_threshold is None or current_oi > last_threshold) and current_oi > avg_oi * 1.1:
                     message = (
                         f"{symbol}: "
-                        f"current={shorten_number(current_oi)}, avg({DEFAULT_LIMIT})={shorten_number(avg_oi)}, "
-                        f"deviation={((current_oi - avg_oi) / avg_oi * 100):.2f}%"
+                        f"current: {shorten_number(current_oi)}, avg({DEFAULT_LIMIT}): {shorten_number(avg_oi)}, "
+                        f"deviation: {((current_oi - avg_oi) / avg_oi * 100):.2f}%"
                     )
                     logger.warning(message)
                     # Запись лога в БД
                     await db_manager.save_log(message)
                     new_threshold = current_oi * 1.01
-                    await redis_client.client.set(last_threshold_key, new_threshold, ex=300)
+                    await redis_client.client.set(last_threshold_key, new_threshold, ex=600)
 
                 elif (last_threshold is None or current_oi < last_threshold) and current_oi < avg_oi * 0.9:
                     message = (
                         f"{symbol}: "
-                        f"current={shorten_number(current_oi)}, avg({DEFAULT_LIMIT})={shorten_number(avg_oi)}, "
-                        f"deviation={((current_oi - avg_oi) / avg_oi * 100):.2f}%"
+                        f"current: {shorten_number(current_oi)}, avg({DEFAULT_LIMIT}): {shorten_number(avg_oi)}, "
+                        f"deviation: {((current_oi - avg_oi) / avg_oi * 100):.2f}%"
                     )
                     logger.warning(message)
                     # Запись лога в БД
